@@ -21,6 +21,10 @@ class Phase3ImplementationTest extends TestCase
     {
         parent::setUp();
         $this->seed();
+        $admin = User::where('role', 'Company Admin')->first();
+        if ($admin) {
+            $this->actingAs($admin, 'sanctum');
+        }
     }
 
     public function test_phase_3a_employee_attendance_lifecycle(): void

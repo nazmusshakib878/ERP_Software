@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Activity;
+use App\Models\AuditLog;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\Product;
@@ -49,6 +50,7 @@ class SaleController extends Controller
             'payment_method' => 'required|string',
             'status' => 'required|string',
             'notes' => 'nullable|string',
+            'discount' => 'nullable|numeric|min:0',
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'nullable|exists:products,id',
             'items.*.product_name' => 'required|string',
@@ -57,15 +59,27 @@ class SaleController extends Controller
         ]);
 
         return DB::transaction(function () use ($validated, $request) {
-            $year = date('Y');
-            $nextOrderNum = 'SAL-' . $year . '-' . (1048 + Sale::count() + 1);
-
             $subtotal = 0;
             foreach ($validated['items'] as $item) {
-                $subtotal += ($item['price'] * $item['quantity']);
+                $subtotal += round((float) $item['price'] * (int) $item['quantity'], 2);
             }
-            $tax = round($subtotal * 0.15, 2); // 15% VAT standard
-            $total = $subtotal + $tax;
+            $discount = isset($validated['discount']) ? round((float) $validated['discount'], 2) : 0;
+            $taxable = max(0, $subtotal - $discount);
+            $tax = round($taxable * 0.15, 2); // 15% Standard VAT
+            $total = round($taxable + $tax, 2);
+
+            // Idempotency guard: prevent accidental double-click duplicate creation within 3 seconds
+            $recentDuplicate = Sale::where('customer_name', $validated['customer_name'])
+                ->where('total', $total)
+                ->where('created_at', '>=', now()->subSeconds(3))
+                ->first();
+
+            if ($recentDuplicate) {
+                return response()->json($recentDuplicate->load('items'), 200);
+            }
+
+            $year = date('Y');
+            $nextOrderNum = 'SAL-' . $year . '-' . (1048 + Sale::count() + 1);
 
             $sale = Sale::create([
                 'order_number' => $nextOrderNum,
@@ -77,7 +91,7 @@ class SaleController extends Controller
                 'date' => now()->toDateString(),
                 'subtotal' => $subtotal,
                 'tax' => $tax,
-                'discount' => 0,
+                'discount' => $discount,
                 'total' => $total,
                 'payment_method' => $validated['payment_method'],
                 'status' => $validated['status'],
@@ -92,10 +106,10 @@ class SaleController extends Controller
                     'sku' => $item['sku'] ?? 'NXR-' . rand(1000, 9999),
                     'price' => $item['price'],
                     'quantity' => $item['quantity'],
-                    'subtotal' => $item['price'] * $item['quantity'],
+                    'subtotal' => round((float) $item['price'] * (int) $item['quantity'], 2),
                 ]);
 
-                // Reduce inventory stock with concurrency-safe locking and overselling prevention
+                // Concurrency-safe pessimistic inventory deduction
                 if (!empty($item['product_id'])) {
                     $prod = Product::lockForUpdate()->find($item['product_id']);
                     if ($prod) {
@@ -120,7 +134,7 @@ class SaleController extends Controller
                 $paidAmount = min($total, max(0, (float)($request->paid_amount ?? ($total * 0.5))));
             }
 
-            // Update customer total spent (only actual paid revenue)
+            // Update customer total spent
             if ($sale->customer_id && $paidAmount > 0) {
                 $customer = Customer::find($sale->customer_id);
                 if ($customer) {
@@ -128,7 +142,7 @@ class SaleController extends Controller
                 }
             }
 
-            // Create corresponding Invoice (Unpaid amounts appear in Accounts Receivable)
+            // Create corresponding Invoice
             $invoiceStatus = ($paidAmount >= $total) ? 'Paid' : ($paidAmount > 0 ? 'Partially paid' : 'Unpaid');
             Invoice::create([
                 'invoice_number' => 'INV-' . date('Y') . '-' . (1048 + Invoice::count() + 1),
@@ -139,6 +153,15 @@ class SaleController extends Controller
                 'total_amount' => $total,
                 'paid_amount' => $paidAmount,
                 'status' => $invoiceStatus,
+            ]);
+
+            AuditLog::create([
+                'user_name' => $request->user()?->name ?? 'Admin',
+                'action' => 'Created Sale Order',
+                'module' => 'Sales',
+                'record_reference' => $sale->order_number,
+                'details' => "Created order {$sale->order_number} for {$sale->customer_name} (Total: ৳{$total}).",
+                'ip_address' => $request->ip(),
             ]);
 
             Activity::create([
@@ -162,7 +185,7 @@ class SaleController extends Controller
         $sale = Sale::findOrFail($id);
 
         $validated = $request->validate([
-            'status' => 'sometimes|required|string|in:Paid,Unpaid,Partial,Overdue',
+            'status' => 'sometimes|required|string|in:Paid,Unpaid,Partial,Partially paid,Overdue,Cancelled',
             'payment_method' => 'sometimes|required|string',
             'notes' => 'nullable|string',
         ]);
@@ -181,17 +204,60 @@ class SaleController extends Controller
 
     public function destroy($id)
     {
-        $sale = Sale::findOrFail($id);
-        $orderNumber = $sale->order_number;
-        $sale->delete();
+        return DB::transaction(function () use ($id) {
+            $sale = Sale::with(['items', 'invoice'])->lockForUpdate()->findOrFail($id);
+            $orderNumber = $sale->order_number;
 
-        Activity::create([
-            'message' => "Order {$orderNumber} was deleted",
-            'actor' => request()->user()?->name ?? 'Admin',
-            'type' => 'sale',
-        ]);
+            // If order was not returned or cancelled, restore deducted stock to inventory
+            if ($sale->status !== 'Returned' && $sale->status !== 'Cancelled') {
+                foreach ($sale->items as $item) {
+                    if ($item->product_id) {
+                        $prod = Product::lockForUpdate()->find($item->product_id);
+                        if ($prod) {
+                            $newStock = $prod->stock + $item->quantity;
+                            $prod->update([
+                                'stock' => $newStock,
+                                'status' => $newStock <= 0 ? 'out_of_stock' : ($newStock <= $prod->threshold ? 'low_stock' : 'in_stock'),
+                            ]);
+                        }
+                    }
+                }
 
-        return response()->json(['message' => 'Sale deleted successfully']);
+                // If customer spent was recorded, decrement it
+                if ($sale->customer_id) {
+                    $customer = Customer::find($sale->customer_id);
+                    if ($customer && $customer->spent > 0) {
+                        $paidAmount = $sale->invoice?->paid_amount ?? ($sale->status === 'Paid' ? $sale->total : 0);
+                        if ($paidAmount > 0) {
+                            $customer->decrement('spent', min($customer->spent, $paidAmount));
+                        }
+                    }
+                }
+            }
+
+            if ($sale->invoice) {
+                $sale->invoice->delete();
+            }
+            $sale->items()->delete();
+            $sale->delete();
+
+            AuditLog::create([
+                'user_name' => request()->user()?->name ?? 'Admin',
+                'action' => 'Sale Deleted & Restocked',
+                'module' => 'Sales',
+                'record_reference' => $orderNumber,
+                'details' => "Order {$orderNumber} deleted. Items restocked to inventory and financial balance adjusted.",
+                'ip_address' => request()->ip(),
+            ]);
+
+            Activity::create([
+                'message' => "Order {$orderNumber} was deleted and stock restored",
+                'actor' => request()->user()?->name ?? 'Admin',
+                'type' => 'sale',
+            ]);
+
+            return response()->json(['message' => "Sale {$orderNumber} deleted and stock restored successfully"]);
+        });
     }
 
     public function processReturn(Request $request, $id)
@@ -214,14 +280,12 @@ class SaleController extends Controller
                 'notes' => ($sale->notes ? $sale->notes . ' | ' : '') . "Return Reason: {$validated['reason']}",
             ]);
 
-            // Adjust invoice status and cancel receivables/receivables
             if ($sale->invoice) {
                 $sale->invoice->update([
                     'status' => 'Cancelled',
                 ]);
             }
 
-            // Adjust customer spent
             if ($sale->customer_id) {
                 $customer = Customer::find($sale->customer_id);
                 if ($customer && $customer->spent > 0) {
@@ -246,7 +310,7 @@ class SaleController extends Controller
                 }
             }
 
-            \App\Models\AuditLog::create([
+            AuditLog::create([
                 'user_name' => $request->user()?->name ?? 'Sales Staff',
                 'action' => 'Sales Return Processed',
                 'module' => 'Sales',
@@ -262,4 +326,3 @@ class SaleController extends Controller
         });
     }
 }
-

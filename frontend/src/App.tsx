@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import {
   BarChart3, Bell, BriefcaseBusiness, Check, ChevronDown, ChevronLeft, ChevronRight,
-  CircleHelp, Download, Edit3, Eye, FileText, Grid2X2,
+  CircleHelp, Download, Edit3, Eye, EyeOff, FileText, Grid2X2, Mail, Sparkles,
   LayoutDashboard, LogOut, Menu, Moon, Package, Plus, RefreshCw, Search,
   Settings, ShoppingCart, Sun, Trash2, TrendingUp, User, UserRound, Users, X,
   ShieldCheck, History, Percent, Sliders, CheckCircle2,
@@ -302,7 +302,8 @@ export default function App() {
   })
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [darkMode, setDarkMode] = useState(false)
-  const [loggedIn, setLoggedIn] = useState(true)
+  const [loggedIn, setLoggedIn] = useState(false)
+  const [authChecking, setAuthChecking] = useState(true)
   const [user, setUser] = useState<{
     id: string
     name: string
@@ -467,8 +468,19 @@ export default function App() {
             setCurrentRole(res.user.role as UserRole)
           }
           setLoggedIn(true)
+        } else {
+          setStoredToken(null)
+          setLoggedIn(false)
         }
-      }).catch(() => {})
+      }).catch(() => {
+        setStoredToken(null)
+        setLoggedIn(false)
+      }).finally(() => {
+        setAuthChecking(false)
+      })
+    } else {
+      setLoggedIn(false)
+      setAuthChecking(false)
     }
   }, [])
 
@@ -563,6 +575,17 @@ export default function App() {
     const emps = employeesList.filter(e => `${e.name} ${e.role}`.toLowerCase().includes(q)).slice(0, 3)
     return { prods, custs, sales, emps }
   }, [globalQuery, productsList, customersList, salesList, employeesList])
+
+  if (authChecking) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--app-bg)' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div className="brand-mark" style={{ width: 44, height: 44, fontSize: 18, margin: '0 auto 16px' }}>NS</div>
+          <div style={{ fontSize: 13, color: 'var(--app-muted)', fontWeight: 500 }}>Connecting to NS ERP workspace...</div>
+        </div>
+      </div>
+    )
+  }
 
   if (!loggedIn) {
     return (
@@ -7520,34 +7543,33 @@ function Login({ onLogin }: { onLogin: (u: any) => void }) {
   const [showPass, setShowPass] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [selectedRole, setSelectedRole] = useState('Company Admin')
+
+  const demoProfiles = [
+    { role: 'Company Admin', email: 'shakib@nserp.com', label: '👑 Admin', color: '#665cf1' },
+    { role: 'Manager', email: 'manager@nserp.com', label: '👔 Manager', color: '#2563eb' },
+    { role: 'Accountant', email: 'accountant@nserp.com', label: '📊 Accountant', color: '#059669' },
+    { role: 'Staff', email: 'staff@nserp.com', label: '🛠️ Staff', color: '#d97706' },
+    { role: 'Employee', email: 'employee@nserp.com', label: '👤 Employee', color: '#64748b' },
+  ]
+
+  const handleSelectRole = (p: typeof demoProfiles[0]) => {
+    setSelectedRole(p.role)
+    setEmail(p.email)
+    setPassword('password')
+    setError('')
+  }
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
     setLoading(true)
     try {
-      try {
-        const res = await api.auth.login({ email, password })
-        if (res.token && res.user) {
-          setStoredToken(res.token)
-          onLogin(res.user)
-          return
-        }
-      } catch (err: any) {
-        // Local demo fallback if backend server isn't running yet
-        if ((email.includes('shakib') || email.includes('alex') || email.includes('arif') || email.includes('admin')) && password === 'password') {
-          onLogin({
-            id: '1',
-            name: email.startsWith('alex') ? 'Alex Morgan' : 'Md. Nazmus Shakib',
-            email,
-            role: email.startsWith('alex') ? 'Administrator' : 'Company Admin',
-            initials: email.startsWith('alex') ? 'AM' : 'NS',
-            workspace: 'NS ERP / Aster Trading Ltd.',
-            avatar: '/user-avatar.jpg',
-          })
-          return
-        }
-        throw err
+      const res = await api.auth.login({ email, password })
+      if (res.token && res.user) {
+        setStoredToken(res.token)
+        onLogin(res.user)
+        return
       }
     } catch (err: any) {
       setError(err.message || 'Login failed. Please check your credentials.')
@@ -7558,106 +7580,126 @@ function Login({ onLogin }: { onLogin: (u: any) => void }) {
 
   return (
     <main className="login-page">
-      <div className="login-brand">
-        <span className="brand-mark">NS</span>
-        <span>NS ERP</span>
+      {/* Decorative ambient glowing orbs */}
+      <div className="login-glow-orb-1" />
+      <div className="login-glow-orb-2" />
+
+      {/* Brand Header */}
+      <div className="login-brand-header">
+        <div className="login-brand-logo-wrap">
+          <div className="login-brand-badge">NS</div>
+          <span className="login-brand-title">NS ERP</span>
+        </div>
+        <p className="login-brand-subtitle">Next-Gen Enterprise Resource Planning Suite</p>
       </div>
 
       <div className="login-card">
         <div className="login-heading">
-          <span className="eyebrow">ENTERPRISE SYSTEM</span>
+          <div className="login-status-pill">
+            <span className="login-status-dot" />
+            Enterprise Gateway · Online
+          </div>
           <h1>Sign in to workspace</h1>
-          <p className="muted">Default: <code>shakib@nserp.com</code> / <code>password</code></p>
+          <p>Enter your corporate credentials to access operations, inventory, and analytics.</p>
         </div>
 
-        {error && <div style={{ color: '#ef4444', fontSize: 11, fontWeight: 500 }}>{error}</div>}
+        {error && (
+          <div className="login-error-banner">
+            <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+            <span>{error}</span>
+          </div>
+        )}
 
         <form onSubmit={handleSignIn} style={{ display: 'grid', gap: 14 }}>
-          <label>
-            Email address
-            <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" required />
-          </label>
+          <div className="login-form-group">
+            <label className="login-form-label">Corporate Email</label>
+            <div className="login-input-wrapper">
+              <Mail size={16} className="login-input-icon" />
+              <input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                type="email"
+                placeholder="name@company.com"
+                required
+              />
+            </div>
+          </div>
 
-          <label>
-            Password
-            <div className="password-field">
+          <div className="login-form-group">
+            <label className="login-form-label">Password</label>
+            <div className="login-input-wrapper password-wrapper">
+              <Lock size={16} className="login-input-icon" />
               <input
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 type={showPass ? 'text' : 'password'}
+                placeholder="••••••••••••"
                 required
               />
-              <button type="button" onClick={() => setShowPass(!showPass)}>
-                {showPass ? 'Hide' : 'Show'}
+              <button
+                type="button"
+                className="login-eye-toggle"
+                onClick={() => setShowPass(!showPass)}
+                title={showPass ? 'Hide password' : 'Show password'}
+              >
+                {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
-          </label>
-
-          <div className="login-options">
-            <label className="check">
-              <input type="checkbox" defaultChecked /> Remember me
-            </label>
-            <button type="button" className="text-button">Forgot password?</button>
           </div>
 
-          <button className="button primary full" type="submit" disabled={loading}>
-            {loading ? 'Authenticating...' : 'Sign in to ERP'} <ChevronRight size={16} />
+          <div className="login-options-row">
+            <label className="check-label">
+              <input type="checkbox" defaultChecked /> Remember workspace
+            </label>
+            <button type="button" className="login-forgot-link">Forgot password?</button>
+          </div>
+
+          <button className="login-submit-btn" type="submit" disabled={loading}>
+            {loading ? (
+              <>
+                <RefreshCw size={15} style={{ animation: 'spin 1s linear infinite' }} />
+                Authenticating...
+              </>
+            ) : (
+              <>
+                Sign in to ERP <ChevronRight size={16} />
+              </>
+            )}
           </button>
         </form>
 
-        {/* 1-Click Role Login for Quick Testing */}
-        <div style={{ marginTop: 10, paddingTop: 12, borderTop: '1px solid var(--app-border)' }}>
-          <p style={{ fontSize: 10, color: 'var(--app-muted)', marginBottom: 8, fontWeight: 600, textTransform: 'uppercase' }}>
-            1-Click Primary Role Switch:
-          </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-            <button
-              type="button"
-              className="button outline small"
-              style={{ fontSize: 10, padding: '3px 7px' }}
-              onClick={() => { setEmail('shakib@nserp.com'); setPassword('password'); }}
-            >
-              👑 Company Admin
-            </button>
-            <button
-              type="button"
-              className="button outline small"
-              style={{ fontSize: 10, padding: '3px 7px' }}
-              onClick={() => { setEmail('manager@nserp.com'); setPassword('password'); }}
-            >
-              👔 Manager
-            </button>
-            <button
-              type="button"
-              className="button outline small"
-              style={{ fontSize: 10, padding: '3px 7px' }}
-              onClick={() => { setEmail('accountant@nserp.com'); setPassword('password'); }}
-            >
-              📊 Accountant
-            </button>
-            <button
-              type="button"
-              className="button outline small"
-              style={{ fontSize: 10, padding: '3px 7px' }}
-              onClick={() => { setEmail('staff@nserp.com'); setPassword('password'); }}
-            >
-              🛠️ Staff
-            </button>
-            <button
-              type="button"
-              className="button outline small"
-              style={{ fontSize: 10, padding: '3px 7px' }}
-              onClick={() => { setEmail('employee@nserp.com'); setPassword('password'); }}
-            >
-              👤 Employee
-            </button>
+        {/* 1-Click Role Profiles for Instant Testing */}
+        <div className="login-roles-section">
+          <div className="login-roles-header">
+            <span className="login-roles-title">
+              <Sparkles size={13} style={{ color: 'var(--app-primary)' }} />
+              Quick Demo Access:
+            </span>
+            <span style={{ fontSize: 10, color: 'var(--app-muted)' }}>Auto-fills credentials</span>
+          </div>
+          <div className="login-roles-grid">
+            {demoProfiles.map((p) => {
+              const isSelected = selectedRole === p.role && email === p.email
+              return (
+                <button
+                  key={p.role}
+                  type="button"
+                  className={`login-role-card ${isSelected ? 'active' : ''}`}
+                  onClick={() => handleSelectRole(p)}
+                >
+                  <span className="login-role-name">{p.label}</span>
+                </button>
+              )
+            })}
           </div>
         </div>
 
-        <p className="login-disclaimer">Powered by Laravel 12 API + Next.js Fullstack Architecture</p>
+        {/* Security Tag */}
+        <div className="login-security-tag">
+          <ShieldCheck size={14} style={{ color: '#10b981' }} />
+          <span>256-bit SSL Encrypted · Sanctum Token Guard</span>
+        </div>
       </div>
-
-      <span className="login-footer">© 2026 NS ERP · Enterprise operations, simplified.</span>
     </main>
   )
 }

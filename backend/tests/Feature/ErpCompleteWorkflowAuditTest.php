@@ -23,6 +23,10 @@ class ErpCompleteWorkflowAuditTest extends TestCase
     {
         parent::setUp();
         $this->seed(DatabaseSeeder::class);
+        $admin = User::where('role', 'Company Admin')->first();
+        if ($admin) {
+            $this->actingAs($admin, 'sanctum');
+        }
     }
 
     /**

@@ -2,11 +2,25 @@
 
 function resolveApiBase(): string {
   const envUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
-  if (!envUrl) {
-    return 'http://127.0.0.1:8000/api';
+
+  if (envUrl) {
+    // Strip trailing slashes and normalize to a clean /api endpoint
+    const clean = envUrl.replace(/\/+$/, '');
+    return clean.endsWith('/api') ? clean : `${clean}/api`;
   }
-  const clean = envUrl.replace(/\/+$/, '');
-  return clean.endsWith('/api') ? clean : `${clean}/api`;
+
+  // In production, strictly reject localhost fallback
+  if (process.env.NODE_ENV === 'production') {
+    if (typeof window !== 'undefined') {
+      console.error(
+        '[NS ERP] Critical: NEXT_PUBLIC_API_URL is missing. Please configure NEXT_PUBLIC_API_URL in Vercel project environment variables (e.g. https://your-backend.onrender.com/api).'
+      );
+    }
+    return '';
+  }
+
+  // Development-only fallback
+  return 'http://127.0.0.1:8000/api';
 }
 
 export const API_BASE = resolveApiBase();
@@ -26,6 +40,12 @@ export function setStoredToken(token: string | null) {
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  if (!API_BASE) {
+    throw new Error(
+      'Backend API is not configured. Please set NEXT_PUBLIC_API_URL in your Vercel environment variables (e.g. https://your-backend.onrender.com/api) and redeploy.'
+    );
+  }
+
   const token = getStoredToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -37,12 +57,16 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_BASE}${endpoint}`, {
+  const normalizedPath = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const res = await fetch(`${API_BASE}${normalizedPath}`, {
     ...options,
     headers,
   });
 
   if (!res.ok) {
+    if (res.status === 401 && typeof window !== 'undefined') {
+      setStoredToken(null);
+    }
     const errorData = await res.json().catch(() => ({}));
     const message = errorData.message || (errorData.errors ? Object.values(errorData.errors).flat().join(', ') : `API Error: ${res.statusText}`);
     throw new Error(message);
@@ -52,6 +76,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 }
 
 export const api = {
+  health: () => request<{ status: string; services: Record<string, string> }>('/health'),
   auth: {
     login: (credentials: { email: string; password: string }) =>
       request<{ message: string; token: string; user: any }>('/login', {

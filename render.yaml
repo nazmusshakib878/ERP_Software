@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: nserp-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: Dockerfile
+    dockerContext: .
+    plan: free
+    region: oregon
+    healthCheckPath: /api/health
+    envVars:
+      - key: APP_NAME
+        value: NS ERP
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: SEED_DEMO_DATA
+        value: "true"
+      - key: DB_CONNECTION
+        value: sqlite
+      - key: ALLOWED_ORIGINS
+        value: https://erp-rouge-five.vercel.app
+

@@ -1,0 +1,44 @@
+# Environment files
+.env
+.env.*
+*.env
+
+# Dependencies
+node_modules/
+**/node_modules/
+vendor/
+**/vendor/
+
+# Build outputs
+.next/
+**/.next/
+dist/
+**/dist/
+out/
+**/out/
+build/
+**/build/
+public/build/
+public/hot/
+public/storage
+
+# Database & SQLite files
+*.sqlite
+*.sqlite3
+*.db
+backend/database/database.sqlite
+backend/database/database.sqlite-shm
+backend/database/database.sqlite-wal
+
+# Storage & Logs
+*.log
+storage/*.key
+backend/storage/logs/*.log
+backend/storage/framework/cache/*
+backend/storage/framework/sessions/*
+backend/storage/framework/views/*
+
+# OS files
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
